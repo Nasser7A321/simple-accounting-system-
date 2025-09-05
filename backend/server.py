@@ -143,6 +143,7 @@ async def log_activity(user_id: str, action: str, details: str, ip_address: str 
     )
     await db.activity_logs.insert_one(log_entry.dict())
 
+# Financial Reports endpoints
 @api_router.get("/reports/profit-loss")
 async def get_profit_loss_report(
     start_date: Optional[str] = None,

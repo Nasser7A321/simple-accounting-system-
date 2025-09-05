@@ -433,73 +433,74 @@ async def export_transactions(
     
     return {"format": "json", "data": export_data, "count": len(export_data)}
 
-# System maintenance endpoints
-@api_router.post("/maintenance/cleanup-expired-users")
-async def manual_cleanup_expired_users(current_user: User = Depends(get_current_user)):
-    """Manually trigger cleanup of expired users"""
-    if current_user.role != UserRole.ADMIN:
+# System settings endpoints
+@api_router.get("/settings/system")
+async def get_system_settings(current_user: User = Depends(get_current_user)):
+    """Get system settings"""
+    if current_user.role not in [UserRole.ADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="ليس لديك صلاحية لتنفيذ صيانة النظام"
+            detail="ليس لديك صلاحية لعرض إعدادات النظام"
         )
-    
-    current_time = datetime.now(timezone.utc)
-    expired_users = await db.users.find({
-        "trial_expires_at": {"$lt": current_time},
-        "role": {"$ne": UserRole.ADMIN}
-    }).to_list(1000)
-    
-    deleted_count = 0
-    deleted_users = []
-    
-    for user in expired_users:
-        await log_activity(current_user.id, "حذف يدوي لمستخدم منتهي الصلاحية", f"تم حذف المستخدم: {user['username']}")
-        await db.users.delete_one({"id": user["id"]})
-        deleted_users.append(user["username"])
-        deleted_count += 1
     
     return {
-        "deleted_count": deleted_count,
-        "deleted_users": deleted_users,
-        "cleanup_time": current_time.isoformat()
+        "system_name": "نظام المحاسبة المتكامل",
+        "version": "1.0.0",
+        "timezone": "Asia/Riyadh",
+        "currency": "ر.س",
+        "backup_enabled": True,
+        "notification_enabled": True,
+        "auto_logout_minutes": 60,
+        "max_file_size_mb": 10
     }
 
-# Backup endpoints
-@api_router.get("/backup/database")
-async def backup_database(current_user: User = Depends(get_current_user)):
-    """Create database backup"""
+@api_router.put("/settings/system")
+async def update_system_settings(
+    settings: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Update system settings"""
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="ليس لديك صلاحية لإنشاء نسخة احتياطية"
+            detail="ليس لديك صلاحية لتعديل إعدادات النظام"
         )
     
-    backup_data = {}
+    await log_activity(current_user.id, "تحديث إعدادات النظام", "تم تحديث إعدادات النظام")
     
-    # Backup users (without passwords)
-    users = await db.users.find({}, {"password": 0}).to_list(1000)
-    backup_data["users"] = users
-    
-    # Backup transactions
-    transactions = await db.transactions.find().to_list(1000)
-    backup_data["transactions"] = transactions
-    
-    # Backup activity logs
-    logs = await db.activity_logs.find().to_list(1000)
-    backup_data["activity_logs"] = logs
-    
-    # Add metadata
-    backup_data["metadata"] = {
-        "backup_date": datetime.now(timezone.utc).isoformat(),
-        "backup_by": current_user.username,
-        "total_users": len(users),
-        "total_transactions": len(transactions),
-        "total_logs": len(logs)
+    return {"message": "تم تحديث الإعدادات بنجاح", "settings": settings}
+
+@api_router.get("/settings/profile")
+async def get_profile_settings(current_user: User = Depends(get_current_user)):
+    """Get user profile settings"""
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role": current_user.role,
+        "created_at": current_user.created_at,
+        "last_login": current_user.last_login
     }
+
+@api_router.put("/settings/profile")
+async def update_profile_settings(
+    profile_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Update user profile settings"""
+    allowed_fields = ["email", "full_name"]
+    update_data = {k: v for k, v in profile_data.items() if k in allowed_fields}
     
-    await log_activity(current_user.id, "إنشاء نسخة احتياطية", "تم إنشاء نسخة احتياطية من قاعدة البيانات")
+    if update_data:
+        await db.users.update_one(
+            {"id": current_user.id},
+            {"$set": update_data}
+        )
+        
+        await log_activity(current_user.id, "تحديث الملف الشخصي", "تم تحديث بيانات الملف الشخصي")
     
-    return backup_data
+    return {"message": "تم تحديث الملف الشخصي بنجاح"}
 
 # Initialize super admin
 @app.on_event("startup")

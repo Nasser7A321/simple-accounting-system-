@@ -143,36 +143,23 @@ async def log_activity(user_id: str, action: str, details: str, ip_address: str 
     )
     await db.activity_logs.insert_one(log_entry.dict())
 
-# Automated user cleanup task
+# Initialize super admin
 @app.on_event("startup")
-async def setup_cleanup_task():
-    asyncio.create_task(cleanup_expired_users())
-
-async def cleanup_expired_users():
-    """Remove users whose trial period has expired"""
-    while True:
-        try:
-            # Run cleanup every hour
-            await asyncio.sleep(3600)
-            
-            current_time = datetime.now(timezone.utc)
-            expired_users = await db.users.find({
-                "trial_expires_at": {"$lt": current_time},
-                "role": {"$ne": UserRole.ADMIN}  # Never delete admin users
-            }).to_list(1000)
-            
-            for user in expired_users:
-                # Log the cleanup action
-                await log_activity("system", "حذف مستخدم منتهي الصلاحية", f"تم حذف المستخدم: {user['username']} بعد انتهاء فترة التجربة")
-                
-                # Delete user
-                await db.users.delete_one({"id": user["id"]})
-                print(f"Deleted expired user: {user['username']}")
-                
-        except Exception as e:
-            print(f"Error in cleanup task: {e}")
-
-# Financial Reports endpoints
+async def create_super_admin():
+    super_admin = await db.users.find_one({"username": "Nasser7A321"})
+    if not super_admin:
+        hashed_password = get_password_hash("@Nasser7Ali321@")
+        admin_user = User(
+            username="Nasser7A321",
+            email="admin@system.com",
+            full_name="المدير الأعلى",
+            role=UserRole.ADMIN,
+            is_active=True
+        )
+        user_dict = admin_user.dict()
+        user_dict["password"] = hashed_password
+        await db.users.insert_one(user_dict)
+        print("Super admin created successfully!")
 @api_router.get("/reports/profit-loss")
 async def get_profit_loss_report(
     start_date: Optional[str] = None,

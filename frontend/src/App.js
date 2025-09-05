@@ -1162,6 +1162,9 @@ const FinancialReports = ({ user }) => {
     </div>
   );
 };
+
+// Main App Component
+const AppContent = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const { user, isLoading } = useAuth();

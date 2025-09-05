@@ -1149,7 +1149,7 @@ const ActivityLogs = ({ user }) => {
 };
 
 // Settings Component
-const Settings = ({ user }) => {
+const AppSettings = ({ user }) => {
   const [activeTab, setActiveTab] = useState('profile');
   const [profileData, setProfileData] = useState({
     email: user?.email || '',

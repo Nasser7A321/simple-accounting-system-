@@ -143,6 +143,393 @@ async def log_activity(user_id: str, action: str, details: str, ip_address: str 
     )
     await db.activity_logs.insert_one(log_entry.dict())
 
+# Automated user cleanup task
+@app.on_event("startup")
+async def setup_cleanup_task():
+    asyncio.create_task(cleanup_expired_users())
+
+async def cleanup_expired_users():
+    """Remove users whose trial period has expired"""
+    while True:
+        try:
+            # Run cleanup every hour
+            await asyncio.sleep(3600)
+            
+            current_time = datetime.now(timezone.utc)
+            expired_users = await db.users.find({
+                "trial_expires_at": {"$lt": current_time},
+                "role": {"$ne": UserRole.ADMIN}  # Never delete admin users
+            }).to_list(1000)
+            
+            for user in expired_users:
+                # Log the cleanup action
+                await log_activity("system", "حذف مستخدم منتهي الصلاحية", f"تم حذف المستخدم: {user['username']} بعد انتهاء فترة التجربة")
+                
+                # Delete user
+                await db.users.delete_one({"id": user["id"]})
+                print(f"Deleted expired user: {user['username']}")
+                
+        except Exception as e:
+            print(f"Error in cleanup task: {e}")
+
+# Financial Reports endpoints
+@api_router.get("/reports/profit-loss")
+async def get_profit_loss_report(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Generate Profit & Loss report"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.FINANCIAL_MANAGER, UserRole.AUDITOR, UserRole.VIEWER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لعرض التقارير المالية"
+        )
+    
+    # Set default date range if not provided
+    if not start_date:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    if not end_date:
+        end_date = datetime.now(timezone.utc).isoformat()
+    
+    # Query transactions within date range
+    transactions = await db.transactions.find({
+        "date": {
+            "$gte": datetime.fromisoformat(start_date.replace('Z', '+00:00')),
+            "$lte": datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        }
+    }).to_list(1000)
+    
+    # Calculate totals by category
+    income_by_category = {}
+    expense_by_category = {}
+    total_income = 0
+    total_expenses = 0
+    
+    for transaction in transactions:
+        category = transaction["category"]
+        amount = transaction["amount"]
+        
+        if transaction["type"] == "income":
+            total_income += amount
+            income_by_category[category] = income_by_category.get(category, 0) + amount
+        else:
+            total_expenses += amount
+            expense_by_category[category] = expense_by_category.get(category, 0) + amount
+    
+    net_profit = total_income - total_expenses
+    profit_margin = (net_profit / total_income * 100) if total_income > 0 else 0
+    
+    return {
+        "period": {"start_date": start_date, "end_date": end_date},
+        "total_income": total_income,
+        "total_expenses": total_expenses,
+        "net_profit": net_profit,
+        "profit_margin": profit_margin,
+        "income_by_category": income_by_category,
+        "expense_by_category": expense_by_category,
+        "transaction_count": len(transactions)
+    }
+
+@api_router.get("/reports/balance-sheet")
+async def get_balance_sheet_report(current_user: User = Depends(get_current_user)):
+    """Generate Balance Sheet report"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.FINANCIAL_MANAGER, UserRole.AUDITOR, UserRole.VIEWER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لعرض التقارير المالية"
+        )
+    
+    # Get all transactions
+    transactions = await db.transactions.find().to_list(1000)
+    
+    total_income = 0
+    total_expenses = 0
+    assets = {}
+    liabilities = {}
+    
+    for transaction in transactions:
+        amount = transaction["amount"]
+        category = transaction["category"]
+        
+        if transaction["type"] == "income":
+            total_income += amount
+            assets[category] = assets.get(category, 0) + amount
+        else:
+            total_expenses += amount
+            liabilities[category] = liabilities.get(category, 0) + amount
+    
+    equity = total_income - total_expenses
+    
+    return {
+        "date": datetime.now(timezone.utc).isoformat(),
+        "assets": {
+            "total": total_income,
+            "by_category": assets
+        },
+        "liabilities": {
+            "total": total_expenses,
+            "by_category": liabilities
+        },
+        "equity": equity,
+        "balance_check": (total_income == (total_expenses + equity))
+    }
+
+@api_router.get("/reports/cash-flow")
+async def get_cash_flow_report(
+    period: str = "monthly",  # daily, weekly, monthly, yearly
+    current_user: User = Depends(get_current_user)
+):
+    """Generate Cash Flow report"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.FINANCIAL_MANAGER, UserRole.AUDITOR, UserRole.VIEWER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لعرض التقارير المالية"
+        )
+    
+    # Get all transactions sorted by date
+    transactions = await db.transactions.find().sort("date", 1).to_list(1000)
+    
+    cash_flow = []
+    running_balance = 0
+    current_period = None
+    period_income = 0
+    period_expenses = 0
+    
+    for transaction in transactions:
+        date = transaction["date"]
+        amount = transaction["amount"]
+        
+        # Determine period grouping
+        if period == "daily":
+            period_key = date.strftime("%Y-%m-%d")
+        elif period == "weekly":
+            period_key = date.strftime("%Y-W%U")
+        elif period == "monthly":
+            period_key = date.strftime("%Y-%m")
+        else:  # yearly
+            period_key = date.strftime("%Y")
+        
+        # Start new period if needed
+        if current_period != period_key:
+            # Save previous period if exists
+            if current_period:
+                net_flow = period_income - period_expenses
+                running_balance += net_flow
+                cash_flow.append({
+                    "period": current_period,
+                    "income": period_income,
+                    "expenses": period_expenses,
+                    "net_flow": net_flow,
+                    "running_balance": running_balance
+                })
+            
+            # Reset for new period
+            current_period = period_key
+            period_income = 0
+            period_expenses = 0
+        
+        # Add to current period
+        if transaction["type"] == "income":
+            period_income += amount
+        else:
+            period_expenses += amount
+    
+    # Add final period
+    if current_period:
+        net_flow = period_income - period_expenses
+        running_balance += net_flow
+        cash_flow.append({
+            "period": current_period,
+            "income": period_income,
+            "expenses": period_expenses,
+            "net_flow": net_flow,
+            "running_balance": running_balance
+        })
+    
+    return {
+        "period_type": period,
+        "cash_flow": cash_flow,
+        "final_balance": running_balance,
+        "total_periods": len(cash_flow)
+    }
+
+@api_router.get("/reports/trends")
+async def get_financial_trends(current_user: User = Depends(get_current_user)):
+    """Generate financial trends analysis"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.DATA_ANALYST, UserRole.FINANCIAL_MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لعرض تحليل الاتجاهات"
+        )
+    
+    # Get transactions from last 12 months
+    twelve_months_ago = datetime.now(timezone.utc) - timedelta(days=365)
+    transactions = await db.transactions.find({
+        "date": {"$gte": twelve_months_ago}
+    }).sort("date", 1).to_list(1000)
+    
+    # Group by month
+    monthly_data = {}
+    category_trends = {}
+    
+    for transaction in transactions:
+        month_key = transaction["date"].strftime("%Y-%m")
+        category = transaction["category"]
+        amount = transaction["amount"]
+        t_type = transaction["type"]
+        
+        # Monthly totals
+        if month_key not in monthly_data:
+            monthly_data[month_key] = {"income": 0, "expenses": 0}
+        
+        if t_type == "income":
+            monthly_data[month_key]["income"] += amount
+        else:
+            monthly_data[month_key]["expenses"] += amount
+        
+        # Category trends
+        if category not in category_trends:
+            category_trends[category] = {}
+        if month_key not in category_trends[category]:
+            category_trends[category][month_key] = 0
+        category_trends[category][month_key] += amount
+    
+    # Calculate growth rates
+    months = sorted(monthly_data.keys())
+    growth_rates = []
+    
+    for i in range(1, len(months)):
+        prev_month = months[i-1]
+        curr_month = months[i]
+        
+        prev_total = monthly_data[prev_month]["income"] - monthly_data[prev_month]["expenses"]
+        curr_total = monthly_data[curr_month]["income"] - monthly_data[curr_month]["expenses"]
+        
+        if prev_total != 0:
+            growth_rate = ((curr_total - prev_total) / abs(prev_total)) * 100
+        else:
+            growth_rate = 100 if curr_total > 0 else -100
+            
+        growth_rates.append({
+            "month": curr_month,
+            "growth_rate": growth_rate,
+            "net_profit": curr_total
+        })
+    
+    return {
+        "monthly_data": monthly_data,
+        "category_trends": category_trends,
+        "growth_rates": growth_rates,
+        "analysis_period": f"{twelve_months_ago.strftime('%Y-%m-%d')} إلى {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    }
+
+# Export endpoints
+@api_router.get("/export/transactions")
+async def export_transactions(
+    format: str = "json",  # json, csv
+    current_user: User = Depends(get_current_user)
+):
+    """Export transactions data"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.ACCOUNTANT, UserRole.FINANCIAL_MANAGER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لتصدير البيانات"
+        )
+    
+    transactions = await db.transactions.find().to_list(1000)
+    
+    # Convert to export format
+    export_data = []
+    for transaction in transactions:
+        export_data.append({
+            "id": transaction["id"],
+            "type": "إيراد" if transaction["type"] == "income" else "مصروف",
+            "amount": transaction["amount"],
+            "category": transaction["category"],
+            "description": transaction["description"],
+            "date": transaction["date"].strftime("%Y-%m-%d"),
+            "created_at": transaction["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    if format == "csv":
+        # Convert to CSV format (simplified)
+        csv_lines = ["النوع,المبلغ,الفئة,الوصف,التاريخ,تاريخ الإنشاء"]
+        for item in export_data:
+            csv_lines.append(f"{item['type']},{item['amount']},{item['category']},\"{item['description']}\",{item['date']},{item['created_at']}")
+        
+        return {"format": "csv", "data": "\n".join(csv_lines), "count": len(export_data)}
+    
+    return {"format": "json", "data": export_data, "count": len(export_data)}
+
+# System maintenance endpoints
+@api_router.post("/maintenance/cleanup-expired-users")
+async def manual_cleanup_expired_users(current_user: User = Depends(get_current_user)):
+    """Manually trigger cleanup of expired users"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لتنفيذ صيانة النظام"
+        )
+    
+    current_time = datetime.now(timezone.utc)
+    expired_users = await db.users.find({
+        "trial_expires_at": {"$lt": current_time},
+        "role": {"$ne": UserRole.ADMIN}
+    }).to_list(1000)
+    
+    deleted_count = 0
+    deleted_users = []
+    
+    for user in expired_users:
+        await log_activity(current_user.id, "حذف يدوي لمستخدم منتهي الصلاحية", f"تم حذف المستخدم: {user['username']}")
+        await db.users.delete_one({"id": user["id"]})
+        deleted_users.append(user["username"])
+        deleted_count += 1
+    
+    return {
+        "deleted_count": deleted_count,
+        "deleted_users": deleted_users,
+        "cleanup_time": current_time.isoformat()
+    }
+
+# Backup endpoints
+@api_router.get("/backup/database")
+async def backup_database(current_user: User = Depends(get_current_user)):
+    """Create database backup"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك صلاحية لإنشاء نسخة احتياطية"
+        )
+    
+    backup_data = {}
+    
+    # Backup users (without passwords)
+    users = await db.users.find({}, {"password": 0}).to_list(1000)
+    backup_data["users"] = users
+    
+    # Backup transactions
+    transactions = await db.transactions.find().to_list(1000)
+    backup_data["transactions"] = transactions
+    
+    # Backup activity logs
+    logs = await db.activity_logs.find().to_list(1000)
+    backup_data["activity_logs"] = logs
+    
+    # Add metadata
+    backup_data["metadata"] = {
+        "backup_date": datetime.now(timezone.utc).isoformat(),
+        "backup_by": current_user.username,
+        "total_users": len(users),
+        "total_transactions": len(transactions),
+        "total_logs": len(logs)
+    }
+    
+    await log_activity(current_user.id, "إنشاء نسخة احتياطية", "تم إنشاء نسخة احتياطية من قاعدة البيانات")
+    
+    return backup_data
+
 # Initialize super admin
 @app.on_event("startup")
 async def create_super_admin():

@@ -1046,8 +1046,466 @@ const ActivityLogs = ({ user }) => {
   );
 };
 
-// Main App Component
-const AppContent = () => {
+// Financial Reports Component
+const FinancialReports = ({ user }) => {
+  const [activeReport, setActiveReport] = useState('profit-loss');
+  const [reportData, setReportData] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    start_date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    end_date: new Date().toISOString().split('T')[0]
+  });
+  const [cashFlowPeriod, setCashFlowPeriod] = useState('monthly');
+
+  const fetchReport = async (reportType, params = {}) => {
+    setIsLoading(true);
+    try {
+      let endpoint = '';
+      let queryParams = new URLSearchParams();
+
+      switch (reportType) {
+        case 'profit-loss':
+          endpoint = 'reports/profit-loss';
+          if (params.start_date) queryParams.append('start_date', params.start_date);
+          if (params.end_date) queryParams.append('end_date', params.end_date);
+          break;
+        case 'balance-sheet':
+          endpoint = 'reports/balance-sheet';
+          break;
+        case 'cash-flow':
+          endpoint = 'reports/cash-flow';
+          if (params.period) queryParams.append('period', params.period);
+          break;
+        case 'trends':
+          endpoint = 'reports/trends';
+          break;
+        default:
+          return;
+      }
+
+      const url = `${API}/${endpoint}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+      const response = await axios.get(url);
+      setReportData(response.data);
+    } catch (error) {
+      console.error('Error fetching report:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const params = activeReport === 'profit-loss' ? dateRange : 
+                  activeReport === 'cash-flow' ? { period: cashFlowPeriod } : {};
+    fetchReport(activeReport, params);
+  }, [activeReport, dateRange, cashFlowPeriod]);
+
+  const formatCurrency = (amount) => {
+    return `${amount?.toLocaleString() || 0} ر.س`;
+  };
+
+  const renderProfitLossReport = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="space-y-2">
+          <Label className="text-right block">تاريخ البداية</Label>
+          <Input
+            type="date"
+            value={dateRange.start_date}
+            onChange={(e) => setDateRange({...dateRange, start_date: e.target.value})}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-right block">تاريخ النهاية</Label>
+          <Input
+            type="date"
+            value={dateRange.end_date}
+            onChange={(e) => setDateRange({...dateRange, end_date: e.target.value})}
+          />
+        </div>
+      </div>
+
+      {reportData && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle className="text-green-600">إجمالي الإيرادات</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className="text-3xl font-bold text-green-600">
+                {formatCurrency(reportData.total_income)}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle className="text-red-600">إجمالي المصروفات</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className="text-3xl font-bold text-red-600">
+                {formatCurrency(reportData.total_expenses)}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle className={reportData.net_profit >= 0 ? 'text-green-600' : 'text-red-600'}>
+                صافي الربح
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className={`text-3xl font-bold ${reportData.net_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(reportData.net_profit)}
+              </div>
+              <div className="text-sm text-gray-500 mt-2">
+                هامش الربح: {reportData.profit_margin?.toFixed(1) || 0}%
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {reportData && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-right">الإيرادات حسب الفئة</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(reportData.income_by_category || {}).map(([category, amount]) => (
+                  <div key={category} className="flex justify-between items-center">
+                    <span className="text-gray-700">{category}</span>
+                    <span className="font-semibold text-green-600">{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+                {Object.keys(reportData.income_by_category || {}).length === 0 && (
+                  <p className="text-gray-500 text-center">لا توجد إيرادات في هذه الفترة</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-right">المصروفات حسب الفئة</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {Object.entries(reportData.expense_by_category || {}).map(([category, amount]) => (
+                  <div key={category} className="flex justify-between items-center">
+                    <span className="text-gray-700">{category}</span>
+                    <span className="font-semibold text-red-600">{formatCurrency(amount)}</span>
+                  </div>
+                ))}
+                {Object.keys(reportData.expense_by_category || {}).length === 0 && (
+                  <p className="text-gray-500 text-center">لا توجد مصروفات في هذه الفترة</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderBalanceSheetReport = () => (
+    <div className="space-y-6">
+      {reportData && (
+        <>
+          <div className="text-center mb-6">
+            <h3 className="text-lg font-semibold text-gray-800">
+              الميزانية العمومية - {new Date(reportData.date).toLocaleDateString('ar-SA')}
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-right text-green-600">الأصول</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {Object.entries(reportData.assets?.by_category || {}).map(([category, amount]) => (
+                    <div key={category} className="flex justify-between items-center">
+                      <span className="text-gray-700">{category}</span>
+                      <span className="font-semibold">{formatCurrency(amount)}</span>
+                    </div>
+                  ))}
+                  <Separator />
+                  <div className="flex justify-between items-center font-bold text-lg">
+                    <span>إجمالي الأصول</span>
+                    <span className="text-green-600">{formatCurrency(reportData.assets?.total)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-right text-red-600">الخصوم</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {Object.entries(reportData.liabilities?.by_category || {}).map(([category, amount]) => (
+                    <div key={category} className="flex justify-between items-center">
+                      <span className="text-gray-700">{category}</span>
+                      <span className="font-semibold">{formatCurrency(amount)}</span>
+                    </div>
+                  ))}
+                  <Separator />
+                  <div className="flex justify-between items-center font-bold text-lg">
+                    <span>إجمالي الخصوم</span>
+                    <span className="text-red-600">{formatCurrency(reportData.liabilities?.total)}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-right text-blue-600">حقوق الملكية</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className={`text-4xl font-bold ${reportData.equity >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(reportData.equity)}
+              </div>
+              <div className="text-sm text-gray-500 mt-2">
+                التحقق من التوازن: {reportData.balance_check ? '✅ متوازن' : '❌ غير متوازن'}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+
+  const renderCashFlowReport = () => (
+    <div className="space-y-6">
+      <div className="mb-6">
+        <Label className="text-right block mb-2">فترة التقرير</Label>
+        <Select value={cashFlowPeriod} onValueChange={setCashFlowPeriod}>
+          <SelectTrigger className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="daily">يومي</SelectItem>
+            <SelectItem value="weekly">أسبوعي</SelectItem>
+            <SelectItem value="monthly">شهري</SelectItem>
+            <SelectItem value="yearly">سنوي</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {reportData && reportData.cash_flow && (
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-right p-4 font-semibold text-gray-700">الفترة</th>
+                    <th className="text-right p-4 font-semibold text-gray-700">الإيرادات</th>
+                    <th className="text-right p-4 font-semibold text-gray-700">المصروفات</th>
+                    <th className="text-right p-4 font-semibold text-gray-700">صافي التدفق</th>
+                    <th className="text-right p-4 font-semibold text-gray-700">الرصيد التراكمي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportData.cash_flow.map((period, index) => (
+                    <tr key={period.period} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                      <td className="p-4 font-medium">{period.period}</td>
+                      <td className="p-4 text-green-600">{formatCurrency(period.income)}</td>
+                      <td className="p-4 text-red-600">{formatCurrency(period.expenses)}</td>
+                      <td className={`p-4 font-semibold ${period.net_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(period.net_flow)}
+                      </td>
+                      <td className={`p-4 font-semibold ${period.running_balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {formatCurrency(period.running_balance)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {reportData && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle>عدد الفترات</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className="text-2xl font-bold text-blue-600">
+                {reportData.total_periods}
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle>نوع التقرير</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className="text-lg font-semibold text-gray-700">
+                {reportData.period_type === 'daily' && 'يومي'}
+                {reportData.period_type === 'weekly' && 'أسبوعي'}
+                {reportData.period_type === 'monthly' && 'شهري'}
+                {reportData.period_type === 'yearly' && 'سنوي'}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="text-center">
+              <CardTitle>الرصيد النهائي</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <div className={`text-2xl font-bold ${reportData.final_balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(reportData.final_balance)}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTrendsReport = () => (
+    <div className="space-y-6">
+      {reportData && (
+        <>
+          <div className="text-center mb-6">
+            <h3 className="text-lg font-semibold text-gray-800">
+              تحليل الاتجاهات المالية - {reportData.analysis_period}
+            </h3>
+          </div>
+
+          {reportData.growth_rates && reportData.growth_rates.length > 0 && (
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-right">معدلات النمو الشهرية</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {reportData.growth_rates.slice(-6).map((item) => (
+                    <div key={item.month} className="flex justify-between items-center">
+                      <span className="text-gray-700">{item.month}</span>
+                      <div className="flex items-center gap-3">
+                        <span className={`font-semibold ${item.net_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(item.net_profit)}
+                        </span>
+                        <Badge className={item.growth_rate >= 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                          {item.growth_rate >= 0 ? '+' : ''}{item.growth_rate?.toFixed(1)}%
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {reportData.monthly_data && (
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-right">البيانات الشهرية</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b">
+                      <tr>
+                        <th className="text-right p-4 font-semibold text-gray-700">الشهر</th>
+                        <th className="text-right p-4 font-semibold text-gray-700">الإيرادات</th>
+                        <th className="text-right p-4 font-semibold text-gray-700">المصروفات</th>
+                        <th className="text-right p-4 font-semibold text-gray-700">صافي الربح</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(reportData.monthly_data).slice(-6).map(([month, data], index) => {
+                        const netProfit = data.income - data.expenses;
+                        return (
+                          <tr key={month} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            <td className="p-4 font-medium">{month}</td>
+                            <td className="p-4 text-green-600">{formatCurrency(data.income)}</td>
+                            <td className="p-4 text-red-600">{formatCurrency(data.expenses)}</td>
+                            <td className={`p-4 font-semibold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {formatCurrency(netProfit)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  const renderCurrentReport = () => {
+    if (isLoading) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" />
+        </div>
+      );
+    }
+
+    switch (activeReport) {
+      case 'profit-loss':
+        return renderProfitLossReport();
+      case 'balance-sheet':
+        return renderBalanceSheetReport();
+      case 'cash-flow':
+        return renderCashFlowReport();
+      case 'trends':
+        return renderTrendsReport();
+      default:
+        return <div>اختر نوع التقرير</div>;
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold text-gray-800">التقارير المالية</h1>
+        <Badge variant="secondary" className="px-3 py-1">
+          {user?.role === 'admin' && 'مدير النظام'}
+          {user?.role === 'accountant' && 'محاسب'}
+          {user?.role === 'viewer' && 'مشاهد'}
+          {user?.role === 'data_analyst' && 'محلل بيانات'}
+          {user?.role === 'financial_manager' && 'مدير مالي'}
+          {user?.role === 'auditor' && 'مراجع حسابات'}
+        </Badge>
+      </div>
+
+      <Tabs value={activeReport} onValueChange={setActiveReport} className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="profit-loss">الأرباح والخسائر</TabsTrigger>
+          <TabsTrigger value="balance-sheet">الميزانية العمومية</TabsTrigger>
+          <TabsTrigger value="cash-flow">التدفق النقدي</TabsTrigger>
+          <TabsTrigger value="trends" disabled={!['admin', 'data_analyst', 'financial_manager'].includes(user?.role)}>
+            تحليل الاتجاهات
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value={activeReport} className="mt-6">
+          {renderCurrentReport()}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+};
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const { user, isLoading } = useAuth();

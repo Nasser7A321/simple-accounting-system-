@@ -143,23 +143,6 @@ async def log_activity(user_id: str, action: str, details: str, ip_address: str 
     )
     await db.activity_logs.insert_one(log_entry.dict())
 
-# Initialize super admin
-@app.on_event("startup")
-async def create_super_admin():
-    super_admin = await db.users.find_one({"username": "Nasser7A321"})
-    if not super_admin:
-        hashed_password = get_password_hash("@Nasser7Ali321@")
-        admin_user = User(
-            username="Nasser7A321",
-            email="admin@system.com",
-            full_name="المدير الأعلى",
-            role=UserRole.ADMIN,
-            is_active=True
-        )
-        user_dict = admin_user.dict()
-        user_dict["password"] = hashed_password
-        await db.users.insert_one(user_dict)
-        print("Super admin created successfully!")
 @api_router.get("/reports/profit-loss")
 async def get_profit_loss_report(
     start_date: Optional[str] = None,

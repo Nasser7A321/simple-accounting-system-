@@ -1545,7 +1545,7 @@ const AppContent = () => {
       case 'logs':
         return <ActivityLogs user={user} />;
       case 'settings':
-        return <Settings user={user} />;
+        return <AppSettings user={user} />;
       default:
         return <Dashboard user={user} />;
     }

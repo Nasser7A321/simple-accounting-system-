@@ -1522,12 +1522,32 @@ const FinancialReports = ({ user }) => {
     return <Login />;
   }
 
+// Main App Component
+const AppContent = () => {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
+
   const renderCurrentPage = () => {
     switch (currentPage) {
       case 'dashboard':
         return <Dashboard user={user} />;
       case 'transactions':
         return <Transactions user={user} />;
+      case 'reports':
+        return <FinancialReports user={user} />;
       case 'users':
         return <UsersManagement user={user} />;
       case 'logs':

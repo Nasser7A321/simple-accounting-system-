@@ -169,12 +169,12 @@ const Login = () => {
 };
 
 // Sidebar Component
-const Sidebar = ({ isOpen, onClose, user }) => {
+const Sidebar = ({ isOpen, onClose, user, currentPage, onPageChange }) => {
   const { logout } = useAuth();
   
   const menuItems = [
     { icon: Home, label: 'الرئيسية', id: 'dashboard', roles: ['admin', 'accountant', 'viewer', 'data_analyst', 'financial_manager', 'auditor'] },
-    { icon: DollarSign, label: 'المعاملات المالية', id: 'transactions', roles: ['admin', 'accountant', 'financial_manager'] },
+    { icon: DollarSign, label: 'المعاملات المالية', id: 'transactions', roles: ['admin', 'accountant', 'financial_manager', 'viewer'] },
     { icon: BarChart3, label: 'التقارير المالية', id: 'reports', roles: ['admin', 'accountant', 'viewer', 'financial_manager', 'auditor'] },
     { icon: Users, label: 'إدارة المستخدمين', id: 'users', roles: ['admin'] },
     { icon: Activity, label: 'سجل العمليات', id: 'logs', roles: ['admin', 'data_analyst'] },
@@ -222,8 +222,13 @@ const Sidebar = ({ isOpen, onClose, user }) => {
             {filteredMenuItems.map((item) => (
               <li key={item.id}>
                 <button
-                  className="w-full flex items-center space-x-3 space-x-reverse px-4 py-3 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-emerald-600 transition-colors duration-200 text-right"
-                  onClick={onClose}
+                  className={`w-full flex items-center space-x-3 space-x-reverse px-4 py-3 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-emerald-600 transition-colors duration-200 text-right ${
+                    currentPage === item.id ? 'bg-emerald-50 text-emerald-600 border-r-4 border-emerald-500' : ''
+                  }`}
+                  onClick={() => {
+                    onPageChange(item.id);
+                    onClose();
+                  }}
                 >
                   <item.icon className="h-5 w-5" />
                   <span className="font-medium">{item.label}</span>
